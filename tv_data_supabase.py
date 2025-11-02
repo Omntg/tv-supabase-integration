@@ -210,6 +210,7 @@ class TradingViewSupabaseFetcher:
     def _is_weekend_or_holiday(self) -> bool:
         """
         Bugünün hafta sonu veya tatil olup olmadığını kontrol eder.
+        holiday_dates.txt dosyasından resmi tatilleri okur.
         
         Returns:
             bool: Hafta sonu/tatil ise True, değilse False
@@ -221,19 +222,54 @@ class TradingViewSupabaseFetcher:
             self.logger.info(f"Hafta sonu olduğu için işlem atlanıyor: {today.strftime('%A %Y-%m-%d')}")
             return True
             
-        # Temel tatil günleri (Türkiye'deki resmi tatiller)
+        # Holiday dates dosyasını kontrol et
+        try:
+            holiday_file = Path("holiday_dates.txt")
+            if holiday_file.exists():
+                today_str = today.strftime("%Y-%m-%d")
+                
+                with open(holiday_file, 'r', encoding='utf-8') as f:
+                    for line in f:
+                        line = line.strip()
+                        # Yorum satırlarını ve boş satırları atla
+                        if not line or line.startswith('#'):
+                            continue
+                        
+                        # Format: YYYY-MM-DD, Aciklama
+                        if ',' in line:
+                            date_part = line.split(',')[0].strip()
+                            if date_part == today_str:
+                                self.logger.info(f"Resmi tatil olduğu için işlem atlanıyor: {today_str} - {line.split(',', 1)[1].strip()}")
+                                return True
+            else:
+                self.logger.warning("holiday_dates.txt dosyası bulunamadı, fallback to hardcoded holidays")
+        except Exception as e:
+            self.logger.warning(f"Holiday dosyası okunamadı: {e}, fallback to hardcoded holidays")
+        
+        # Fallback: Temel tatil günleri (2025 için güncel listesi)
         holidays = [
-            (1, 1),   # Yeni Yıl
-            (4, 23),  # Ulusal Egemenlik ve Çocuk Bayramı
-            (5, 1),   # İşçi Bayramı
-            (5, 19),  # Atatürk Anma, Gençlik ve Spor Bayramı
-            (8, 30),  # Zafer Bayramı
-            (10, 29), # Cumhuriyet Bayramı
+            (1, 1, "Yeni Yıl Tatili"),
+            (3, 29, "Ramazan Bayramı Arefesi"),
+            (3, 30, "Ramazan Bayramı 1. Gün"),
+            (3, 31, "Ramazan Bayramı 2. Gün"),
+            (4, 1, "Ramazan Bayramı 3. Gün"),
+            (4, 23, "Ulusal Egemenlik ve Çocuk Bayramı"),
+            (5, 1, "Emek ve Dayanışma Günü"),
+            (5, 19, "Atatürk'ü Anma Gençlik ve Spor Bayramı"),
+            (6, 5, "Kurban Bayramı Arefesi"),
+            (6, 6, "Kurban Bayramı 1. Gün"),
+            (6, 7, "Kurban Bayramı 2. Gün"),
+            (6, 8, "Kurban Bayramı 3. Gün"),
+            (6, 9, "Kurban Bayramı 4. Gün"),
+            (7, 15, "Demokrasi ve Milli Birlik Günü"),
+            (8, 30, "Zafer Bayramı"),
+            (10, 28, "Cumhuriyet Bayramı Arefesi"),
+            (10, 29, "Cumhuriyet Bayramı"),
         ]
         
-        for month, day in holidays:
+        for month, day, name in holidays:
             if today.month == month and today.day == day:
-                self.logger.info(f"Resmi tatil olduğu için işlem atlanıyor: {today.strftime('%Y-%m-%d')}")
+                self.logger.info(f"Resmi tatil olduğu için işlem atlanıyor: {today.strftime('%Y-%m-%d')} - {name}")
                 return True
                 
         return False

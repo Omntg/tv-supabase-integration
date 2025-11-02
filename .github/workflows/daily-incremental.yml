@@ -43,7 +43,7 @@ jobs:
     - name: TradingView ile artışlı veri güncellemesi (100 bar)
       env:
         SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-        SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
         TV_USERNAME: ${{ secrets.TV_USERNAME }}
         TV_PASSWORD: ${{ secrets.TV_PASSWORD }}
         INCREMENTAL_FETCH_BARS: 5
