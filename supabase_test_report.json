@@ -1,0 +1,32 @@
+{
+  "timestamp": "2025-11-03T05:34:55.361624",
+  "supabase_url": "https://ghfkkcatjzaopsasjtzn.supabase.co",
+  "test_results": {
+    "basic_connection": true,
+    "date_check": false,
+    "data_op_single_insert": false,
+    "data_op_select_operations": false,
+    "data_op_filtered_select": false,
+    "bulk_insert": true,
+    "error_handling": true,
+    "error_details": [
+      "Yanlış tablo adı hatası doğru yakalandı",
+      "Geçertsiz sütun adı hatası doğru yakalandı"
+    ]
+  },
+  "performance_results": {
+    "read_100_records": 0.0,
+    "filtered_read_50": 0.0,
+    "aggregate_query": 0.0
+  },
+  "environment": {
+    "python_version": "3.12.5 (main, Sep  5 2024, 00:16:34) [GCC 12.2.0]",
+    "os_name": "posix",
+    "env_vars": {
+      "SUPABASE_URL": "https://gh...",
+      "SUPABASE_ACCESS_TOKEN": "sbp_oauth_...",
+      "SUPABASE_ANON_KEY": "eyJhbGciOi...",
+      "SUPABASE_PROJECT_ID": "ghfkkcatjz..."
+    }
+  }
+}
