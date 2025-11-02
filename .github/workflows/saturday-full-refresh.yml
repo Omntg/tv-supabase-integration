@@ -2,7 +2,7 @@ name: Cumartesi Tam Yenileme
 
 on:
   schedule:
-    # Cumartesi günü saat 16:00 UTC (Türkiye saati 19:00)
+    # Cumartesi günü saat 16:00 UTC (Türkiye saati 19:00 - UTC+3)
     - cron: '0 16 * * 6'
   workflow_dispatch:
     inputs:
@@ -46,8 +46,9 @@ jobs:
         SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
         TV_USERNAME: ${{ secrets.TV_USERNAME }}
         TV_PASSWORD: ${{ secrets.TV_PASSWORD }}
+        FULL_REFRESH_N_BARS: 5000
       run: |
-        echo "Tam yenileme başlatılıyor (5000 bar)..."
+        echo "Tam yenileme başlatılıyor (FULL_REFRESH_N_BARS=5000)..."
         echo "Bu işlem hisse bölünmeleri ve fiyat düzeltmeleri için kritik."
         python tv_data_supabase.py --full-refresh
       continue-on-error: false
@@ -55,32 +56,58 @@ jobs:
     - name: Tam yenileme sonuçlarını raporla
       if: always()
       run: |
+        echo "=== TAM YENİLEME RAPORU ==="
         if [ -f "update_results.json" ]; then
-          echo "=== TAM YENİLEME VERİ ÖZETİ ==="
+          echo "✅ Sonuç dosyası başarıyla oluşturuldu."
+          echo ""
+          echo "📊 TAM YENİLEME VERİ ÖZETİ:"
           cat update_results.json
           echo ""
-          echo "Tam yenilenmiş sembol sayısı: $(cat update_results.json | jq '.total_symbols_processed // 0' | head -1)"
-          echo "Başarılı yenilemeler: $(cat update_results.json | jq '.successful_updates // 0' | head -1)"
-          echo "Hatalı işlemler: $(cat update_results.json | jq '.failed_updates // 0' | head -1)"
-          echo "Toplam güncellenen kayıt sayısı: $(cat update_results.json | jq '.total_records_updated // 0' | head -1)"
+          echo "📈 DETAYLI İSTATİSTİKLER:"
+          echo "├─ Tam yenilenmiş sembol sayısı: $(cat update_results.json | jq -r '.total_symbols_processed // "0"' | head -1)"
+          echo "├─ Başarılı yenilemeler: $(cat update_results.json | jq -r '.successful_updates // "0"' | head -1)"
+          echo "├─ Hatalı işlemler: $(cat update_results.json | jq -r '.failed_updates // "0"' | head -1)"
+          echo "└─ Toplam güncellenen kayıt sayısı: $(cat update_results.json | jq -r '.total_records_updated // "0"' | head -1)"
+          
+          # Kritik hata kontrolü
+          FAILED=$(cat update_results.json | jq -r '.failed_updates // 0' | head -1)
+          if [ "$FAILED" -gt 0 ]; then
+            echo ""
+            echo "⚠️  KRİTİK UYARI: $FAILED hatalı işlem tespit edildi!"
+            echo "Bu hisse senedi bölünmeleri ve fiyat düzeltmelerini etkileyebilir."
+            echo "Hata detayları için log dosyalarını kontrol edin."
+          fi
         else
-          echo "Tam yenileme sonuç dosyası bulunamadı."
+          echo "❌ HATA: Tam yenileme sonuç dosyası bulunamadı!"
           echo "İşlem log dosyalarını kontrol edin."
+          ls -la *.log 2>/dev/null || echo "Log dosyası bulunamadı."
         fi
 
     - name: Veri bütünlüğü kontrolü
       if: success()
       run: |
         echo "=== VERİ BÜTÜNLÜK KONTROLÜ ==="
-        echo "Supabase bağlantısı test ediliyor..."
+        echo "🔍 Supabase bağlantısı ve veri bütünlüğü test ediliyor..."
+        echo ""
         python test_supabase_connection.py
-        echo "Veri bütünlüğü kontrolü tamamlandı."
+        echo ""
+        echo "✅ Veri bütünlüğü kontrolü tamamlandı."
 
     - name: Tam yenileme özetini logla
       if: always()
       run: |
-        echo "Tam yenileme işlemi durumu: ${{ job.status }}"
-        echo "Çalışma zamanı: ${{ github.run_id }}"
-        echo "İşlem tarihi: $(date)"
-        echo "İşlem türü: Tam yenileme (5000 bar)"
-        echo "Hisse bölünmeleri ve fiyat düzeltmeleri uygulandı."
+        echo "=== TAM YENİLEME ÖZET RAPORU ==="
+        echo "⏰ İşlem zamanı (UTC): $(date -u)"
+        echo "🕐 Türkiye saati: $(TZ='Europe/Istanbul' date)"
+        echo "🔄 GitHub Run ID: ${{ github.run_id }}"
+        echo "✅ İşlem durumu: ${{ job.status }}"
+        echo "📍 Runner: ${{ runner.os }} - ${{ runner.arch }}"
+        echo "🏷️  Workflow: ${{ github.workflow }}"
+        echo "🌍 Commit: ${{ github.sha }}"
+        echo ""
+        echo "🎯 İşlem Özellikleri:"
+        echo "├─ İşlem türü: Tam yenileme (FULL_REFRESH_N_BARS=5000)"
+        echo "├─ Amaç: Hisse senedi bölünmeleri ve fiyat düzeltmeleri"
+        echo "└─ Kritik işlem: Market veri doğruluğu için gerekli"
+        echo ""
+        echo "📊 Sonuç: $( [ "${{ job.status }}" = "success" ] && echo "✅ Başarılı - Veri bütünlüğü korundu" || echo "❌ Başarısız - Kontrol gerekli" )"

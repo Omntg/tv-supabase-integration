@@ -32,6 +32,7 @@ from pathlib import Path
 import pandas as pd
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import warnings
+import calendar
 
 # Supabase and TV Datafeed imports
 try:
@@ -206,6 +207,81 @@ class TradingViewSupabaseFetcher:
             self.logger.error(f"Supabase client başlatılamadı: {e}")
             raise
     
+    def _is_weekend_or_holiday(self) -> bool:
+        """
+        Bugünün hafta sonu veya tatil olup olmadığını kontrol eder.
+        
+        Returns:
+            bool: Hafta sonu/tatil ise True, değilse False
+        """
+        today = datetime.now()
+        
+        # Hafta sonu kontrolü (Saturday=5, Sunday=6)
+        if today.weekday() >= 5:  # Saturday or Sunday
+            self.logger.info(f"Hafta sonu olduğu için işlem atlanıyor: {today.strftime('%A %Y-%m-%d')}")
+            return True
+            
+        # Temel tatil günleri (Türkiye'deki resmi tatiller)
+        holidays = [
+            (1, 1),   # Yeni Yıl
+            (4, 23),  # Ulusal Egemenlik ve Çocuk Bayramı
+            (5, 1),   # İşçi Bayramı
+            (5, 19),  # Atatürk Anma, Gençlik ve Spor Bayramı
+            (8, 30),  # Zafer Bayramı
+            (10, 29), # Cumhuriyet Bayramı
+        ]
+        
+        for month, day in holidays:
+            if today.month == month and today.day == day:
+                self.logger.info(f"Resmi tatil olduğu için işlem atlanıyor: {today.strftime('%Y-%m-%d')}")
+                return True
+                
+        return False
+    
+    def _check_if_new_data_needed(self, symbol: str) -> bool:
+        """
+        Supabase'den son kaydedilen tarihi kontrol eder ve yeni veri gerekip gerekmediğini belirler.
+        
+        Args:
+            symbol (str): Sembol adı
+            
+        Returns:
+            bool: Yeni veri gerekiyorsa True, değilse False
+        """
+        try:
+            table_name = self.config.get('TABLE_NAME', 'trading_data')
+            today = datetime.now().date()
+            
+            # Bugünkü veri var mı kontrol et
+            result = self.supabase_client.table(table_name).select('date').eq('code', symbol).gte('date', str(today)).execute()
+            
+            if result.data and len(result.data) > 0:
+                self.logger.info(f"Bugün için veri mevcut: {symbol} - {today}")
+                return False
+                
+            # Son kaydedilen tarihi getir
+            result = self.supabase_client.table(table_name).select('date').eq('code', symbol).order('date', desc=True).limit(1).execute()
+            
+            if not result.data:
+                # İlk kez veri çekilecek
+                self.logger.info(f"İlk veri çekimi: {symbol}")
+                return True
+                
+            last_date = datetime.strptime(result.data[0]['date'], '%Y-%m-%d').date()
+            days_diff = (today - last_date).days
+            
+            # 1 günden fazla fark varsa yeni veri gerekli
+            if days_diff >= 1:
+                self.logger.info(f"Yeni veri gerekli: {symbol} - Son veri: {last_date}, Bugün: {today}, Fark: {days_diff} gün")
+                return True
+            else:
+                self.logger.info(f"Veri güncel: {symbol} - Son veri: {last_date}, Bugün: {today}")
+                return False
+                
+        except Exception as e:
+            self.logger.warning(f"Tarih kontrolü yapılamadı {symbol}: {e} - Yeni veri çekilecek")
+            return True
+    
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=4, max=10),
@@ -225,33 +301,49 @@ class TradingViewSupabaseFetcher:
             Exception: Veri çekme başarısız olursa
         """
         try:
-            self.logger.debug(f"Veri çekiliyor: {symbol}")
+            # Yeni veri kontrolü - sadece gerekliyse API çağrısı yap
+            if not self.config.get('FULL_REFRESH', False):
+                incremental_fetch = os.getenv('INCREMENTAL_FETCH_BARS', 'true').lower() == 'true'
+                if incremental_fetch and not self._check_if_new_data_needed(symbol):
+                    self.logger.info(f"Veri güncel olduğu için atlanıyor: {symbol}")
+                    return None
+            
+            self.logger.info(f"📡 TradingView API çağrısı başlatılıyor: {symbol}")
             
             # TradingView parametreleri
             exchange = 'BIST'
             interval = Interval.in_daily
-            n_bars = self.config.get('FULL_REFRESH_N_BARS', 5000)
+            
+            # INCREMENTAL_FETCH_BARS ayarına göre n_bars belirle
+            if self.config.get('FULL_REFRESH', False):
+                n_bars = self.config.get('FULL_REFRESH_N_BARS', 5000)
+                self.logger.debug(f"Full refresh modu: {n_bars} bar çekilecek")
+            else:
+                n_bars = self.config.get('INCREMENTAL_FETCH_BARS', 100)
+                self.logger.debug(f"Incremental modu: {n_bars} bar çekilecek")
             
             # Veri çekme
+            start_time = time.time()
             data = self.tv_client.get_hist(
                 symbol=symbol,
                 exchange=exchange,
                 interval=interval,
                 n_bars=n_bars
             )
+            api_call_time = time.time() - start_time
             
             if data is None or data.empty:
-                self.logger.warning(f"Sembol için veri bulunamadı: {symbol}")
+                self.logger.warning(f"⚠️ Sembol için veri bulunamadı: {symbol}")
                 return None
                 
             # DataFrame'i işle
             df_processed = self._process_dataframe(data, symbol)
-            self.logger.debug(f"Veri başarıyla işlendi: {symbol} - {len(df_processed)} kayıt")
+            self.logger.info(f"✅ Veri başarıyla işlendi: {symbol} - {len(df_processed)} kayıt ({api_call_time:.2f}s)")
             
             return df_processed
             
         except Exception as e:
-            self.logger.error(f"Sembol verisi çekilemedi {symbol}: {e}")
+            self.logger.error(f"❌ Sembol verisi çekilemedi {symbol}: {e}")
             self.execution_stats['errors'].append(f"{symbol}: {e}")
             raise
     
@@ -424,17 +516,30 @@ class TradingViewSupabaseFetcher:
             Dict[str, Any]: İşlem sonuçları
         """
         try:
-            self.logger.info("TradingView veri çekme işlemi başlatılıyor...")
+            self.logger.info("🚀 TradingView veri çekme işlemi başlatılıyor...")
+            
+            # Hafta sonu/tatil kontrolü
+            if self._is_weekend_or_holiday():
+                self.logger.info("📅 Hafta sonu/tatil olduğu için işlem durduruluyor")
+                self.execution_stats['execution_time_seconds'] = 0
+                self.execution_stats['completion_time'] = datetime.now().isoformat()
+                return self.execution_stats
             
             # Setup
             self._load_symbols()
             self._initialize_clients()
             
             start_time = time.time()
-            self.logger.info(f"Toplam {len(self.symbols)} sembol işlenecek")
+            mode = "FULL REFRESH" if self.config.get('FULL_REFRESH', False) else "INCREMENTAL"
+            incremental_fetch = os.getenv('INCREMENTAL_FETCH_BARS', 'true').lower() == 'true'
+            
+            self.logger.info(f"📊 Çalışma modu: {mode}")
+            self.logger.info(f"🔧 Incremental fetch: {incremental_fetch}")
+            self.logger.info(f"📈 Toplam {len(self.symbols)} sembol işlenecek")
             
             # Parallel processing
             max_workers = self.config.get('MAX_WORKERS', 5)
+            self.logger.info(f"👥 Paralel işçi sayısı: {max_workers}")
             
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
                 # Submit all tasks
@@ -452,11 +557,11 @@ class TradingViewSupabaseFetcher:
                     try:
                         success = future.result()
                         if success:
-                            self.logger.info(f"Tamamlandı ({completed}/{len(self.symbols)}): {symbol}")
+                            self.logger.info(f"✅ Tamamlandı ({completed}/{len(self.symbols)}): {symbol}")
                         else:
-                            self.logger.warning(f"Başarısız ({completed}/{len(self.symbols)}): {symbol}")
+                            self.logger.warning(f"⚠️ Başarısız/Atlandı ({completed}/{len(self.symbols)}): {symbol}")
                     except Exception as e:
-                        self.logger.error(f"Hata ({completed}/{len(self.symbols)}): {symbol} - {e}")
+                        self.logger.error(f"❌ Hata ({completed}/{len(self.symbols)}): {symbol} - {e}")
             
             # İstatistikleri tamamla
             end_time = time.time()
@@ -465,13 +570,13 @@ class TradingViewSupabaseFetcher:
             self.execution_stats['execution_time_seconds'] = execution_time
             self.execution_stats['completion_time'] = datetime.now().isoformat()
             
-            self.logger.info(f"İşlem tamamlandı. Süre: {execution_time:.2f} saniye")
-            self.logger.info(f"İstatistikler: {self.execution_stats}")
+            self.logger.info(f"🏁 İşlem tamamlandı. Süre: {execution_time:.2f} saniye")
+            self.logger.info(f"📊 İstatistikler: {self.execution_stats}")
             
             return self.execution_stats
             
         except Exception as e:
-            self.logger.error(f"Kritik hata: {e}")
+            self.logger.error(f"💥 Kritik hata: {e}")
             self.execution_stats['errors'].append(f"Critical: {e}")
             return self.execution_stats
 
@@ -493,6 +598,7 @@ def load_config() -> Dict[str, Any]:
         'INCREMENTAL_FETCH_BARS': int(os.getenv('INCREMENTAL_FETCH_BARS', '100')),
         'FULL_REFRESH_N_BARS': int(os.getenv('FULL_REFRESH_N_BARS', '5000')),
         'TABLE_NAME': os.getenv('TABLE_NAME', 'trading_data'),
+        'INCREMENTAL_FETCH_BARS_ENABLED': os.getenv('INCREMENTAL_FETCH_BARS', 'true').lower() == 'true',
         'FULL_REFRESH': False
     }
     
@@ -542,9 +648,15 @@ Environment Variables:
   TV_PASSWORD           TradingView şifresi
   SYMBOL_LIST_PATH      Sembol listesi dosya yolu
   MAX_WORKERS           Paralel işlem sayısı (varsayılan: 5)
-  INCREMENTAL_FETCH_BARS Incremental çekme bar sayısı
+  INCREMENTAL_FETCH_BARS Incremental çekme kontrolü (true/false, varsayılan: true)
   FULL_REFRESH_N_BARS   Full refresh bar sayısı
   TABLE_NAME            Tablo adı (varsayılan: trading_data)
+
+Command Line Options:
+  --full-refresh        Tüm verileri yeniden yükle (incremental yerine)
+  --workers N           Paralel işlem sayısı (varsayılan: 5)
+  --disable-incremental Incremental fetch kontrolünü devre dışı bırak
+  --output FILE         Çıkış dosyası adı (varsayılan: execution_summary.json)
         """
     )
     
@@ -568,6 +680,12 @@ Environment Variables:
         help='Çıkış dosyası adı (varsayılan: execution_summary.json)'
     )
     
+    parser.add_argument(
+        '--disable-incremental',
+        action='store_true',
+        help='Incremental fetch kontrolünü devre dışı bırak (tüm semboller için veri çek)'
+    )
+    
     args = parser.parse_args()
     
     try:
@@ -576,9 +694,15 @@ Environment Variables:
         config['MAX_WORKERS'] = args.workers
         config['FULL_REFRESH'] = args.full_refresh
         
+        if args.disable_incremental:
+            os.environ['INCREMENTAL_FETCH_BARS'] = 'false'
+            config['INCREMENTAL_FETCH_BARS_ENABLED'] = False
+        
         # Mode bilgisini yazdır
         mode = "FULL REFRESH" if args.full_refresh else "INCREMENTAL"
+        incremental_status = "AKTİF" if config['INCREMENTAL_FETCH_BARS_ENABLED'] else "PASİF"
         print(f"🚀 Çalışma modu: {mode}")
+        print(f"🔧 Incremental fetch: {incremental_status}")
         print(f"👥 Paralel işçi sayısı: {args.workers}")
         
         # Fetcher'ı başlat

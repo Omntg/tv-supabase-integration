@@ -2,7 +2,7 @@ name: Günlük Artışlı Veri Güncellemesi
 
 on:
   schedule:
-    # Her gün saat 16:00 UTC (Türkiye saati 19:00)
+    # Her gün saat 16:00 UTC (Türkiye saati 19:00 - UTC+3)
     - cron: '0 16 * * 1-5'
   workflow_dispatch:
     inputs:
@@ -46,29 +46,50 @@ jobs:
         SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
         TV_USERNAME: ${{ secrets.TV_USERNAME }}
         TV_PASSWORD: ${{ secrets.TV_PASSWORD }}
+        INCREMENTAL_FETCH_BARS: 5
       run: |
-        echo "Artışlı veri güncellemesi başlatılıyor (100 bar)..."
-        python tv_data_supabase.py --days 100
+        echo "Artışlı veri güncellemesi başlatılıyor (INCREMENTAL_FETCH_BARS=5)..."
+        python tv_data_supabase.py
       continue-on-error: false
 
     - name: Güncelleme sonuçlarını raporla
       if: always()
       run: |
+        echo "=== GÜNCELLENMIŞ VERİ RAPORU ==="
         if [ -f "update_results.json" ]; then
-          echo "=== GÜNCELLENMIŞ VERİ ÖZETİ ==="
+          echo "Sonuç dosyası başarıyla oluşturuldu."
+          echo ""
+          echo "📊 GÜNCEL VERİ ÖZETİ:"
           cat update_results.json
           echo ""
-          echo "Toplam işlenen sembol sayısı: $(cat update_results.json | jq '.total_symbols_processed // 0' | head -1)"
-          echo "Başarılı güncellemeler: $(cat update_results.json | jq '.successful_updates // 0' | head -1)"
-          echo "Hatalı işlemler: $(cat update_results.json | jq '.failed_updates // 0' | head -1)"
+          echo "📈 İŞLEM İSTATİSTİKLERİ:"
+          echo "├─ Toplam işlenen sembol sayısı: $(cat update_results.json | jq -r '.total_symbols_processed // "0"' | head -1)"
+          echo "├─ Başarılı güncellemeler: $(cat update_results.json | jq -r '.successful_updates // "0"' | head -1)"
+          echo "└─ Hatalı işlemler: $(cat update_results.json | jq -r '.failed_updates // "0"' | head -1)"
+          
+          # Error durumunda uyarı
+          FAILED=$(cat update_results.json | jq -r '.failed_updates // 0' | head -1)
+          if [ "$FAILED" -gt 0 ]; then
+            echo ""
+            echo "⚠️  UYARI: $FAILED hatalı işlem tespit edildi!"
+            echo "Hata detayları için log dosyalarını kontrol edin."
+          fi
         else
-          echo "Güncelleme sonuç dosyası bulunamadı."
+          echo "❌ HATA: Güncelleme sonuç dosyası bulunamadı!"
           echo "İşlem log dosyalarını kontrol edin."
+          ls -la *.log 2>/dev/null || echo "Log dosyası bulunamadı."
         fi
 
     - name: İşlem durumunu logla
       if: always()
       run: |
-        echo "İşlem durumu: ${{ job.status }}"
-        echo "Çalışma zamanı: ${{ github.run_id }}"
-        echo "Tarih: $(date)"
+        echo "=== İŞLEM ÖZET RAPORU ==="
+        echo "⏰ İşlem zamanı (UTC): $(date -u)"
+        echo "🕐 Türkiye saati: $(TZ='Europe/Istanbul' date)"
+        echo "🔄 GitHub Run ID: ${{ github.run_id }}"
+        echo "✅ İşlem durumu: ${{ job.status }}"
+        echo "📍 Runner: ${{ runner.os }} - ${{ runner.arch }}"
+        echo "🏷️  Workflow: ${{ github.workflow }}"
+        echo "🌍 Commit: ${{ github.sha }}"
+        echo ""
+        echo "🎯 Sonuç: $( [ "${{ job.status }}" = "success" ] && echo "✅ Başarılı" || echo "❌ Başarısız" )"
