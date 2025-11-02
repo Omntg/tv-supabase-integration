@@ -195,10 +195,10 @@ class TradingViewSupabaseFetcher:
         try:
             # Supabase client
             url = self.config.get('SUPABASE_URL')
-            key = self.config.get('SUPABASE_ANON_KEY')
+            key = self.config.get('SUPABASE_KEY')
             
             if not url or not key:
-                raise ValueError("SUPABASE_URL ve SUPABASE_ANON_KEY gerekli")
+                raise ValueError("SUPABASE_URL ve SUPABASE_KEY gerekli")
                 
             self.supabase_client = create_client(url, key)
             self.logger.info("Supabase client başarıyla başlatıldı")
@@ -210,7 +210,6 @@ class TradingViewSupabaseFetcher:
     def _is_weekend_or_holiday(self) -> bool:
         """
         Bugünün hafta sonu veya tatil olup olmadığını kontrol eder.
-        holiday_dates.txt dosyasından resmi tatilleri okur.
         
         Returns:
             bool: Hafta sonu/tatil ise True, değilse False
@@ -222,54 +221,19 @@ class TradingViewSupabaseFetcher:
             self.logger.info(f"Hafta sonu olduğu için işlem atlanıyor: {today.strftime('%A %Y-%m-%d')}")
             return True
             
-        # Holiday dates dosyasını kontrol et
-        try:
-            holiday_file = Path("holiday_dates.txt")
-            if holiday_file.exists():
-                today_str = today.strftime("%Y-%m-%d")
-                
-                with open(holiday_file, 'r', encoding='utf-8') as f:
-                    for line in f:
-                        line = line.strip()
-                        # Yorum satırlarını ve boş satırları atla
-                        if not line or line.startswith('#'):
-                            continue
-                        
-                        # Format: YYYY-MM-DD, Aciklama
-                        if ',' in line:
-                            date_part = line.split(',')[0].strip()
-                            if date_part == today_str:
-                                self.logger.info(f"Resmi tatil olduğu için işlem atlanıyor: {today_str} - {line.split(',', 1)[1].strip()}")
-                                return True
-            else:
-                self.logger.warning("holiday_dates.txt dosyası bulunamadı, fallback to hardcoded holidays")
-        except Exception as e:
-            self.logger.warning(f"Holiday dosyası okunamadı: {e}, fallback to hardcoded holidays")
-        
-        # Fallback: Temel tatil günleri (2025 için güncel listesi)
+        # Temel tatil günleri (Türkiye'deki resmi tatiller)
         holidays = [
-            (1, 1, "Yeni Yıl Tatili"),
-            (3, 29, "Ramazan Bayramı Arefesi"),
-            (3, 30, "Ramazan Bayramı 1. Gün"),
-            (3, 31, "Ramazan Bayramı 2. Gün"),
-            (4, 1, "Ramazan Bayramı 3. Gün"),
-            (4, 23, "Ulusal Egemenlik ve Çocuk Bayramı"),
-            (5, 1, "Emek ve Dayanışma Günü"),
-            (5, 19, "Atatürk'ü Anma Gençlik ve Spor Bayramı"),
-            (6, 5, "Kurban Bayramı Arefesi"),
-            (6, 6, "Kurban Bayramı 1. Gün"),
-            (6, 7, "Kurban Bayramı 2. Gün"),
-            (6, 8, "Kurban Bayramı 3. Gün"),
-            (6, 9, "Kurban Bayramı 4. Gün"),
-            (7, 15, "Demokrasi ve Milli Birlik Günü"),
-            (8, 30, "Zafer Bayramı"),
-            (10, 28, "Cumhuriyet Bayramı Arefesi"),
-            (10, 29, "Cumhuriyet Bayramı"),
+            (1, 1),   # Yeni Yıl
+            (4, 23),  # Ulusal Egemenlik ve Çocuk Bayramı
+            (5, 1),   # İşçi Bayramı
+            (5, 19),  # Atatürk Anma, Gençlik ve Spor Bayramı
+            (8, 30),  # Zafer Bayramı
+            (10, 29), # Cumhuriyet Bayramı
         ]
         
-        for month, day, name in holidays:
+        for month, day in holidays:
             if today.month == month and today.day == day:
-                self.logger.info(f"Resmi tatil olduğu için işlem atlanıyor: {today.strftime('%Y-%m-%d')} - {name}")
+                self.logger.info(f"Resmi tatil olduğu için işlem atlanıyor: {today.strftime('%Y-%m-%d')}")
                 return True
                 
         return False
@@ -413,8 +377,8 @@ class TradingViewSupabaseFetcher:
                 'volume': 'volume_t'
             }, inplace=True)
             
-            # Veri tiplerini düzenle
-            df_clean['date'] = pd.to_datetime(df_clean['date'])
+            # Veri tiplerini düzenle - Timestamp nesnelerini JSON serializable string formatına çevir
+            df_clean['date'] = pd.to_datetime(df_clean['date']).dt.strftime('%Y-%m-%d %H:%M:%S')
             df_clean['high_tl'] = pd.to_numeric(df_clean['high_tl'], errors='coerce')
             df_clean['low_tl'] = pd.to_numeric(df_clean['low_tl'], errors='coerce')
             df_clean['closing_tl'] = pd.to_numeric(df_clean['closing_tl'], errors='coerce')
@@ -480,8 +444,10 @@ class TradingViewSupabaseFetcher:
                     .eq('code', symbol)\
                     .execute()
                 
+                # JSON serializable format için data'ları temizle
+                records = self._make_json_serializable(df)
                 result = self.supabase_client.table(table_name)\
-                    .insert(df.to_dict('records'))\
+                    .insert(records)\
                     .execute()
                     
                 new_records = len(result.data) if result.data else len(df)
@@ -498,9 +464,11 @@ class TradingViewSupabaseFetcher:
                     self.logger.info(f"Yeni veri yok: {symbol}")
                     return 0, 0
                 
+                # JSON serializable format için data'ları temizle
+                records = self._make_json_serializable(df_new)
                 # Upsert işlemi
                 result = self.supabase_client.table(table_name)\
-                    .upsert(df_new.to_dict('records'), on_conflict='code,date')\
+                    .upsert(records, on_conflict='code,date')\
                     .execute()
                     
                 new_records = len(df_new)
@@ -508,6 +476,48 @@ class TradingViewSupabaseFetcher:
                 
         except Exception as e:
             self.logger.error(f"Upsert başarısız {symbol}: {e}")
+            raise
+    
+    def _make_json_serializable(self, df: pd.DataFrame) -> List[Dict]:
+        """
+        DataFrame'i JSON serializable formata çevirir.
+        
+        Args:
+            df (pd.DataFrame): JSON serializable hale getirilecek DataFrame
+            
+        Returns:
+            List[Dict]: JSON serializable kayıt listesi
+        """
+        try:
+            # DataFrame'i dict'le çevir
+            records = df.to_dict('records')
+            
+            # Her kayıt için JSON serializable kontrol yap
+            serializable_records = []
+            for record in records:
+                clean_record = {}
+                for key, value in record.items():
+                    if pd.isna(value):
+                        clean_record[key] = None
+                    elif isinstance(value, (pd.Timestamp, pd.NaT)):
+                        # Timestamp nesnelerini string'e çevir
+                        clean_record[key] = str(value) if pd.notna(value) else None
+                    elif isinstance(value, (int, float)):
+                        # Sayısal değerleri kontrol et
+                        clean_record[key] = float(value) if pd.notna(value) else None
+                    elif isinstance(value, str):
+                        # String değerleri kontrol et
+                        clean_record[key] = value.strip() if value else None
+                    else:
+                        # Diğer türleri string'e çevir
+                        clean_record[key] = str(value) if value is not None else None
+                
+                serializable_records.append(clean_record)
+            
+            return serializable_records
+            
+        except Exception as e:
+            self.logger.error(f"JSON serializable hale getirme hatası: {e}")
             raise
     
     def _process_symbol(self, symbol: str) -> bool:
@@ -554,16 +564,12 @@ class TradingViewSupabaseFetcher:
         try:
             self.logger.info("🚀 TradingView veri çekme işlemi başlatılıyor...")
             
-            # Hafta sonu/tatil kontrolü - sadece force_run değilse
-            force_run = os.getenv('FORCE_RUN', 'false').lower() == 'true'
-            if self._is_weekend_or_holiday() and not force_run:
+            # Hafta sonu/tatil kontrolü
+            if self._is_weekend_or_holiday():
                 self.logger.info("📅 Hafta sonu/tatil olduğu için işlem durduruluyor")
-                self.logger.info("💡 Hafta sonu çalışması için 'force_run: true' parametresiyle yeniden çalıştırın")
                 self.execution_stats['execution_time_seconds'] = 0
                 self.execution_stats['completion_time'] = datetime.now().isoformat()
                 return self.execution_stats
-            elif force_run:
-                self.logger.info("🔄 Force run modu aktif - hafta sonu/tatil kontrolü atlanıyor")
             
             # Setup
             self._load_symbols()
@@ -630,7 +636,7 @@ def load_config() -> Dict[str, Any]:
     """
     config = {
         'SUPABASE_URL': os.getenv('SUPABASE_URL'),
-        'SUPABASE_ANON_KEY': os.getenv('SUPABASE_ANON_KEY'),
+        'SUPABASE_KEY': os.getenv('SUPABASE_KEY'),
         'TV_USERNAME': os.getenv('TV_USERNAME'),
         'TV_PASSWORD': os.getenv('TV_PASSWORD'),
         'SYMBOL_LIST_PATH': os.getenv('SYMBOL_LIST_PATH'),
@@ -643,7 +649,7 @@ def load_config() -> Dict[str, Any]:
     }
     
     # Validate required config
-    required = ['SUPABASE_URL', 'SUPABASE_ANON_KEY']
+    required = ['SUPABASE_URL', 'SUPABASE_KEY']
     missing = [key for key in required if not config[key]]
     
     if missing:
@@ -683,7 +689,7 @@ def main():
   
 Environment Variables:
   SUPABASE_URL          Supabase project URL
-  SUPABASE_ANON_KEY     Supabase anon key
+  SUPABASE_KEY          Supabase service role key
   TV_USERNAME           TradingView kullanıcı adı
   TV_PASSWORD           TradingView şifresi
   SYMBOL_LIST_PATH      Sembol listesi dosya yolu
@@ -691,7 +697,6 @@ Environment Variables:
   INCREMENTAL_FETCH_BARS Incremental çekme kontrolü (true/false, varsayılan: true)
   FULL_REFRESH_N_BARS   Full refresh bar sayısı
   TABLE_NAME            Tablo adı (varsayılan: trading_data)
-  FORCE_RUN             Hafta sonu kontrolünü atla (true/false, varsayılan: false)
 
 Command Line Options:
   --full-refresh        Tüm verileri yeniden yükle (incremental yerine)
