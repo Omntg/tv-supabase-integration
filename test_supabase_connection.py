@@ -16,7 +16,7 @@ from contextlib import contextmanager
 
 # Environment variables ile yapılandırma
 SUPABASE_URL = os.getenv('SUPABASE_URL', "https://ghfkkcatjzaopsasjtzn.supabase.co")
-SUPABASE_KEY = os.getenv('SUPABASE_KEY', "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdoZmtrY2F0anphb3BzYXNqdHpuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjIwMzE1MzksImV4cCI6MjA3NzYwNzUzOX0.xMzj9-d4wB-eUxaGvhD1x8Xkeez09uxgnEGuf3HNhVw")
+SUPABASE_ANON_KEY = os.getenv('SUPABASE_ANON_KEY', "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdoZmtrY2F0anphb3BzYXNqdHpuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjIwMzE1MzksImV4cCI6MjA3NzYwNzUzOX0.xMzj9-d4wB-eUxaGvhD1x8Xkeez09uxgnEGuf3HNhVw")
 
 # Logging yapılandırması
 logging.basicConfig(
@@ -83,7 +83,7 @@ class SupabaseTester:
         """Supabase bağlantısını kurar"""
         try:
             from supabase import create_client
-            self.supabase_client = create_client(SUPABASE_URL, SUPABASE_KEY)
+            self.supabase_client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
             logger.info("✅ Supabase client başarıyla oluşturuldu")
         except ImportError:
             logger.error("❌ supabase-py paketi bulunamadı. pip install supabase ile yükleyin.")

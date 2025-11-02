@@ -195,10 +195,10 @@ class TradingViewSupabaseFetcher:
         try:
             # Supabase client
             url = self.config.get('SUPABASE_URL')
-            key = self.config.get('SUPABASE_KEY')
+            key = self.config.get('SUPABASE_ANON_KEY')
             
             if not url or not key:
-                raise ValueError("SUPABASE_URL ve SUPABASE_KEY gerekli")
+                raise ValueError("SUPABASE_URL ve SUPABASE_ANON_KEY gerekli")
                 
             self.supabase_client = create_client(url, key)
             self.logger.info("Supabase client başarıyla başlatıldı")
@@ -626,7 +626,7 @@ def load_config() -> Dict[str, Any]:
     """
     config = {
         'SUPABASE_URL': os.getenv('SUPABASE_URL'),
-        'SUPABASE_KEY': os.getenv('SUPABASE_KEY'),
+        'SUPABASE_ANON_KEY': os.getenv('SUPABASE_ANON_KEY'),
         'TV_USERNAME': os.getenv('TV_USERNAME'),
         'TV_PASSWORD': os.getenv('TV_PASSWORD'),
         'SYMBOL_LIST_PATH': os.getenv('SYMBOL_LIST_PATH'),
@@ -639,7 +639,7 @@ def load_config() -> Dict[str, Any]:
     }
     
     # Validate required config
-    required = ['SUPABASE_URL', 'SUPABASE_KEY']
+    required = ['SUPABASE_URL', 'SUPABASE_ANON_KEY']
     missing = [key for key in required if not config[key]]
     
     if missing:
@@ -679,7 +679,7 @@ def main():
   
 Environment Variables:
   SUPABASE_URL          Supabase project URL
-  SUPABASE_KEY          Supabase service role key
+  SUPABASE_ANON_KEY          Supabase service role key
   TV_USERNAME           TradingView kullanıcı adı
   TV_PASSWORD           TradingView şifresi
   SYMBOL_LIST_PATH      Sembol listesi dosya yolu
