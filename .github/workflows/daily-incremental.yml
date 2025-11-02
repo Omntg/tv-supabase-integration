@@ -47,6 +47,7 @@ jobs:
         TV_USERNAME: ${{ secrets.TV_USERNAME }}
         TV_PASSWORD: ${{ secrets.TV_PASSWORD }}
         INCREMENTAL_FETCH_BARS: 5
+        FORCE_RUN: ${{ github.event.inputs.force_run }}
       run: |
         echo "Artışlı veri güncellemesi başlatılıyor (INCREMENTAL_FETCH_BARS=5)..."
         python tv_data_supabase.py

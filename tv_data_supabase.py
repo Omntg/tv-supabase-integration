@@ -554,12 +554,16 @@ class TradingViewSupabaseFetcher:
         try:
             self.logger.info("🚀 TradingView veri çekme işlemi başlatılıyor...")
             
-            # Hafta sonu/tatil kontrolü
-            if self._is_weekend_or_holiday():
+            # Hafta sonu/tatil kontrolü - sadece force_run değilse
+            force_run = os.getenv('FORCE_RUN', 'false').lower() == 'true'
+            if self._is_weekend_or_holiday() and not force_run:
                 self.logger.info("📅 Hafta sonu/tatil olduğu için işlem durduruluyor")
+                self.logger.info("💡 Hafta sonu çalışması için 'force_run: true' parametresiyle yeniden çalıştırın")
                 self.execution_stats['execution_time_seconds'] = 0
                 self.execution_stats['completion_time'] = datetime.now().isoformat()
                 return self.execution_stats
+            elif force_run:
+                self.logger.info("🔄 Force run modu aktif - hafta sonu/tatil kontrolü atlanıyor")
             
             # Setup
             self._load_symbols()
@@ -679,7 +683,7 @@ def main():
   
 Environment Variables:
   SUPABASE_URL          Supabase project URL
-  SUPABASE_ANON_KEY          Supabase service role key
+  SUPABASE_ANON_KEY     Supabase anon key
   TV_USERNAME           TradingView kullanıcı adı
   TV_PASSWORD           TradingView şifresi
   SYMBOL_LIST_PATH      Sembol listesi dosya yolu
@@ -687,6 +691,7 @@ Environment Variables:
   INCREMENTAL_FETCH_BARS Incremental çekme kontrolü (true/false, varsayılan: true)
   FULL_REFRESH_N_BARS   Full refresh bar sayısı
   TABLE_NAME            Tablo adı (varsayılan: trading_data)
+  FORCE_RUN             Hafta sonu kontrolünü atla (true/false, varsayılan: false)
 
 Command Line Options:
   --full-refresh        Tüm verileri yeniden yükle (incremental yerine)

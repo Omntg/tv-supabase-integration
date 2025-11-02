@@ -47,6 +47,7 @@ jobs:
         TV_USERNAME: ${{ secrets.TV_USERNAME }}
         TV_PASSWORD: ${{ secrets.TV_PASSWORD }}
         FULL_REFRESH_N_BARS: 5000
+        FORCE_RUN: ${{ github.event.inputs.force_run }}
       run: |
         echo "Tam yenileme başlatılıyor (FULL_REFRESH_N_BARS=5000)..."
         echo "Bu işlem hisse bölünmeleri ve fiyat düzeltmeleri için kritik."
