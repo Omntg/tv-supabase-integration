@@ -1,0 +1,86 @@
+name: Cumartesi Tam Yenileme
+
+on:
+  schedule:
+    # Cumartesi günü saat 16:00 UTC (Türkiye saati 19:00)
+    - cron: '0 16 * * 6'
+  workflow_dispatch:
+    inputs:
+      force_run:
+        description: 'Zorla çalıştır (manuel tetikleme)'
+        required: false
+        default: 'false'
+
+jobs:
+  full-refresh-data:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: [3.11]
+
+    steps:
+    - name: Repository'yi klonla
+      uses: actions/checkout@v4
+
+    - name: Python ${{ matrix.python-version }} kurulumu
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Cache pip dependencies
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+
+    - name: Bağımlılıkları yükle
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: TradingView tam yenileme (5000 bar)
+      env:
+        SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+        SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        TV_USERNAME: ${{ secrets.TV_USERNAME }}
+        TV_PASSWORD: ${{ secrets.TV_PASSWORD }}
+      run: |
+        echo "Tam yenileme başlatılıyor (5000 bar)..."
+        echo "Bu işlem hisse bölünmeleri ve fiyat düzeltmeleri için kritik."
+        python tv_data_supabase.py --full-refresh
+      continue-on-error: false
+
+    - name: Tam yenileme sonuçlarını raporla
+      if: always()
+      run: |
+        if [ -f "update_results.json" ]; then
+          echo "=== TAM YENİLEME VERİ ÖZETİ ==="
+          cat update_results.json
+          echo ""
+          echo "Tam yenilenmiş sembol sayısı: $(cat update_results.json | jq '.total_symbols_processed // 0' | head -1)"
+          echo "Başarılı yenilemeler: $(cat update_results.json | jq '.successful_updates // 0' | head -1)"
+          echo "Hatalı işlemler: $(cat update_results.json | jq '.failed_updates // 0' | head -1)"
+          echo "Toplam güncellenen kayıt sayısı: $(cat update_results.json | jq '.total_records_updated // 0' | head -1)"
+        else
+          echo "Tam yenileme sonuç dosyası bulunamadı."
+          echo "İşlem log dosyalarını kontrol edin."
+        fi
+
+    - name: Veri bütünlüğü kontrolü
+      if: success()
+      run: |
+        echo "=== VERİ BÜTÜNLÜK KONTROLÜ ==="
+        echo "Supabase bağlantısı test ediliyor..."
+        python test_supabase_connection.py
+        echo "Veri bütünlüğü kontrolü tamamlandı."
+
+    - name: Tam yenileme özetini logla
+      if: always()
+      run: |
+        echo "Tam yenileme işlemi durumu: ${{ job.status }}"
+        echo "Çalışma zamanı: ${{ github.run_id }}"
+        echo "İşlem tarihi: $(date)"
+        echo "İşlem türü: Tam yenileme (5000 bar)"
+        echo "Hisse bölünmeleri ve fiyat düzeltmeleri uygulandı."

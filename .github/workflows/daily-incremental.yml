@@ -1,0 +1,74 @@
+name: Günlük Artışlı Veri Güncellemesi
+
+on:
+  schedule:
+    # Her gün saat 16:00 UTC (Türkiye saati 19:00)
+    - cron: '0 16 * * 1-5'
+  workflow_dispatch:
+    inputs:
+      force_run:
+        description: 'Zorla çalıştır (manuel tetikleme)'
+        required: false
+        default: 'false'
+
+jobs:
+  update-daily-data:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: [3.11]
+
+    steps:
+    - name: Repository'yi klonla
+      uses: actions/checkout@v4
+
+    - name: Python ${{ matrix.python-version }} kurulumu
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Cache pip dependencies
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+
+    - name: Bağımlılıkları yükle
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: TradingView ile artışlı veri güncellemesi (100 bar)
+      env:
+        SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+        SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        TV_USERNAME: ${{ secrets.TV_USERNAME }}
+        TV_PASSWORD: ${{ secrets.TV_PASSWORD }}
+      run: |
+        echo "Artışlı veri güncellemesi başlatılıyor (100 bar)..."
+        python tv_data_supabase.py --days 100
+      continue-on-error: false
+
+    - name: Güncelleme sonuçlarını raporla
+      if: always()
+      run: |
+        if [ -f "update_results.json" ]; then
+          echo "=== GÜNCELLENMIŞ VERİ ÖZETİ ==="
+          cat update_results.json
+          echo ""
+          echo "Toplam işlenen sembol sayısı: $(cat update_results.json | jq '.total_symbols_processed // 0' | head -1)"
+          echo "Başarılı güncellemeler: $(cat update_results.json | jq '.successful_updates // 0' | head -1)"
+          echo "Hatalı işlemler: $(cat update_results.json | jq '.failed_updates // 0' | head -1)"
+        else
+          echo "Güncelleme sonuç dosyası bulunamadı."
+          echo "İşlem log dosyalarını kontrol edin."
+        fi
+
+    - name: İşlem durumunu logla
+      if: always()
+      run: |
+        echo "İşlem durumu: ${{ job.status }}"
+        echo "Çalışma zamanı: ${{ github.run_id }}"
+        echo "Tarih: $(date)"
